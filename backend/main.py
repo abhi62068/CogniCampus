@@ -1,0 +1,213 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Optional, Any
+from supabase import create_client, Client
+import os
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Supabase
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
+
+# --- DATA MODELS ---
+class Subject(BaseModel):
+    name: str
+    conducted: int
+    attended: int
+    user_id: str  
+
+class ProfileSetup(BaseModel):
+    student_name: str
+    attendance_mode: str
+    target_percentage: int
+    semester_start_date: Optional[str] = None
+    last_working_day: Optional[str] = None
+
+class HolidaySetup(BaseModel):
+    title: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class ExamSetup(BaseModel):
+    title: str
+    exam_type: str
+    dates: List[str]
+    gap_rule: str
+
+class FullSetupPayload(BaseModel):
+    user_id: str
+    profile: ProfileSetup
+    holidays: List[HolidaySetup]
+    exams: List[ExamSetup]
+    timetable: Dict[str, Any]
+
+class AttendanceMark(BaseModel):
+    user_id: str
+    subject_id: int
+    period_number: int
+    status: str # "Present" or "Absent"
+
+@app.get("/api/status")
+def get_status():
+    return {"status": "System Online 🟢"}
+
+# --- SUBJECT ENDPOINTS ---
+@app.get("/api/subjects")
+def get_subjects(user_id: str):
+    try:
+        response = supabase.table("subjects").select("*").eq("user_id", user_id).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/subjects")
+def add_subject(subject: Subject):
+    try:
+        response = supabase.table("subjects").insert(subject.dict()).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/api/subjects/{subject_id}")
+def delete_subject(subject_id: int):
+    try:
+        supabase.table("subjects").delete().eq("id", subject_id).execute()
+        return {"message": "Success"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- SETUP WIZARD ENDPOINTS ---
+@app.get("/api/setup/{user_id}")
+def get_setup(user_id: str):
+    try:
+        profile_res = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
+        events_res = supabase.table("holidays_and_exams").select("*").eq("user_id", user_id).execute()
+        timetable_res = supabase.table("timetable_slots").select("*").eq("user_id", user_id).execute()
+
+        if not profile_res.data:
+            return {"has_setup": False}
+
+        # Uses 'day_of_week' to match Supabase
+        timetable_dict = {f"{s['day_of_week']}-{s['period_number']}": str(s['subject_id']) for s in timetable_res.data}
+
+        return {
+            "has_setup": True,
+            "profile": profile_res.data[0],
+            "events": events_res.data,
+            "timetable": timetable_dict
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/setup")
+def save_setup(payload: FullSetupPayload):
+    try:
+        uid = payload.user_id
+        # 1. Clear and Update Profile
+        supabase.table("profiles").delete().eq("user_id", uid).execute()
+        supabase.table("profiles").insert({"user_id": uid, **payload.profile.dict()}).execute()
+        
+        # 2. Clear and Update Holidays/Exams
+        supabase.table("holidays_and_exams").delete().eq("user_id", uid).execute()
+        events = []
+        for h in payload.holidays:
+            if h.title: events.append({"user_id": uid, "type": "Holiday", **h.dict()})
+        for e in payload.exams:
+            if e.title: events.append({"user_id": uid, "type": "Exam", **e.dict()})
+        if events: supabase.table("holidays_and_exams").insert(events).execute()
+
+        # 3. Clear and Update Timetable Slots
+        supabase.table("timetable_slots").delete().eq("user_id", uid).execute()
+        slots = []
+        for key, sid in payload.timetable.items():
+            if sid and sid != "":
+                day, period = key.split('-')
+                slots.append({
+                    "user_id": uid, 
+                    "day_of_week": day, 
+                    "period_number": int(period), 
+                    "subject_id": int(sid)
+                })
+        if slots: supabase.table("timetable_slots").insert(slots).execute()
+        return {"message": "Setup Saved"}
+    except Exception as e:
+        print(f"Setup Save Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# --- DAILY ATTENDANCE ENDPOINTS ---
+@app.get("/api/today-schedule/{user_id}")
+def get_today_schedule(user_id: str):
+    try:
+        days_map = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        today_name = days_map[datetime.now().weekday()]
+        today_date = datetime.now().date().isoformat()
+
+        # Join timetable with subjects table to get subject names
+        slots = supabase.table("timetable_slots")\
+            .select("period_number, subject_id, subjects(name)")\
+            .eq("user_id", user_id)\
+            .eq("day_of_week", today_name)\
+            .order("period_number")\
+            .execute()
+
+        logs = supabase.table("attendance_logs")\
+            .select("period_number, status")\
+            .eq("user_id", user_id)\
+            .eq("date", today_date)\
+            .execute()
+
+        return {
+            "day": today_name, 
+            "date": today_date, 
+            "slots": slots.data if slots.data else [], 
+            "logs": logs.data if logs.data else []
+        }
+    except Exception as e:
+        print(f"Today Schedule Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/mark-attendance")
+def mark_attendance(data: AttendanceMark):
+    try:
+        today_date = datetime.now().date().isoformat()
+        
+        # 1. Log the history entry
+        supabase.table("attendance_logs").insert({
+            "user_id": data.user_id, 
+            "subject_id": data.subject_id, 
+            "period_number": data.period_number, 
+            "date": today_date, 
+            "status": data.status
+        }).execute()
+        
+        # 2. Fetch current stats and update
+        sub = supabase.table("subjects").select("conducted, attended").eq("id", data.subject_id).single().execute()
+        
+        # Increment conducted for every mark; increment attended only if 'Present'
+        new_c = int(sub.data['conducted']) + 1
+        new_a = int(sub.data['attended']) + (1 if data.status == "Present" else 0)
+        
+        supabase.table("subjects").update({
+            "conducted": new_c, 
+            "attended": new_a
+        }).eq("id", data.subject_id).execute()
+
+        return {"message": "Updated"}
+    except Exception as e:
+        print(f"Marking Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
