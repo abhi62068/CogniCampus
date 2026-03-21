@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import BunkMeter from "./components/BunkMeter";
 import Auth from "./components/Auth";
@@ -9,12 +9,13 @@ const supabase = createClient(
   "https://esojecwsoumsezwrplcl.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzb2plY3dzb3Vtc2V6d3JwbGNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMDk1MjQsImV4cCI6MjA4OTU4NTUyNH0.6ToR4xAjWtxSSAhnt5zkBEz6bXAq8InKVGCferp_HAk",
 );
-// --- UPDATED: Added targetAttendance state and fetchUserSettings function ---
+
 function App() {
   const [session, setSession] = useState(null);
   const [apiStatus, setApiStatus] = useState("Connecting...");
   const [subjects, setSubjects] = useState([]);
   const [activeTab, setActiveTab] = useState("dashboard");
+  // --- UPDATED: Added targetAttendance state ---
   const [targetAttendance, setTargetAttendance] = useState(75); 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -27,25 +28,26 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchSubjects = () => {
+  const fetchSubjects = useCallback(() => {
     if (!session) return;
     fetch(`http://127.0.0.1:8000/api/subjects?user_id=${session.user.id}`)
       .then((res) => res.json())
       .then((data) => setSubjects(data));
-  };
+  }, [session]);
 
   // --- UPDATED: Added fetchUserSettings to get target_percentage ---
-  const fetchUserSettings = () => {
+  const fetchUserSettings = useCallback(() => {
     if (!session) return;
     fetch(`http://127.0.0.1:8000/api/setup/${session.user.id}`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.has_setup && data.profile.target_percentage) {
-          setTargetAttendance(data.profile.target_percentage);
+        if (data.has_setup && data.profile?.target_percentage !== undefined && data.profile?.target_percentage !== null) {
+          const parsedTarget = Number(data.profile.target_percentage);
+          setTargetAttendance(Number.isFinite(parsedTarget) ? parsedTarget : 75);
         }
       })
       .catch((err) => console.error("Error fetching settings:", err));
-  };
+  }, [session]);
 
   useEffect(() => {
     if (session) {
@@ -57,7 +59,7 @@ function App() {
       fetchSubjects();
       fetchUserSettings(); // Fetch settings on load
     }
-  }, [session]);
+  }, [session, fetchSubjects, fetchUserSettings]);
 
   const handleAddSubject = async (e) => {
     e.preventDefault();
@@ -76,11 +78,6 @@ function App() {
       setIsModalOpen(false);
       setNewName("");
     }
-  };
-
-  const handleDeleteSubject = async (id) => {
-    await fetch(`http://127.0.0.1:8000/api/subjects/${id}`, { method: "DELETE" });
-    fetchSubjects();
   };
 
   if (!session) return <Auth />;
@@ -121,13 +118,14 @@ function App() {
 
               {/* --- UPDATED: Passing targetAttendance prop --- */}
               <BunkMeter
+                key={`${subjects.reduce((sum, sub) => sum + sub.conducted, 0)}-${subjects.reduce((sum, sub) => sum + sub.attended, 0)}`}
                 defaultConducted={subjects.reduce((sum, sub) => sum + sub.conducted, 0)}
                 defaultAttended={subjects.reduce((sum, sub) => sum + sub.attended, 0)}
                 targetAttendance={targetAttendance} 
               />
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 col-span-1 lg:col-span-3 position-relative">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">Your Subjects</h3>
+                <h3 className="text-xl font-bold text-gray-800 mb-4">Your Subjects Database</h3>
                 <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-6 py-2 m-5 rounded-lg font-bold shadow-lg shadow-blue-200">
                   + Add Subject
                 </button>
