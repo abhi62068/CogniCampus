@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 // Ensure targetAttendance is received as a prop here
 export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0, targetAttendance = 75 }) {

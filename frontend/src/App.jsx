@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import BunkMeter from "./components/BunkMeter";
 import Auth from "./components/Auth";
@@ -27,12 +27,26 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchSubjects = () => {
+  const fetchSubjects = useCallback(() => {
     if (!session) return;
     fetch(`http://127.0.0.1:8000/api/subjects?user_id=${session.user.id}`)
       .then((res) => res.json())
       .then((data) => setSubjects(data));
-  };
+  }, [session]);
+
+  // --- UPDATED: Added fetchUserSettings to get target_percentage ---
+  const fetchUserSettings = useCallback(() => {
+    if (!session) return;
+    fetch(`http://127.0.0.1:8000/api/setup/${session.user.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.has_setup && data.profile?.target_percentage !== undefined && data.profile?.target_percentage !== null) {
+          const parsedTarget = Number(data.profile.target_percentage);
+          setTargetAttendance(Number.isFinite(parsedTarget) ? parsedTarget : 75);
+        }
+      })
+      .catch((err) => console.error("Error fetching settings:", err));
+  }, [session]);
 
   // --- UPDATED: Added fetchUserSettings to get target_percentage ---
   const fetchUserSettings = () => {
@@ -57,7 +71,7 @@ function App() {
       fetchSubjects();
       fetchUserSettings(); // Fetch settings on load
     }
-  }, [session]);
+  }, [session, fetchSubjects, fetchUserSettings]);
 
   const handleAddSubject = async (e) => {
     e.preventDefault();
