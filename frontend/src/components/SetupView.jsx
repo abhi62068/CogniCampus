@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export default function SetupView({ session, subjects }) {
+export default function SetupView({ session, subjects, onSaveComplete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hasData, setHasData] = useState(false);
@@ -38,7 +38,15 @@ export default function SetupView({ session, subjects }) {
             last_working_day: data.profile.last_working_day || ''
           });
           setHolidays(data.events.filter(e => e.type === 'Holiday'));
-          setExams(data.events.filter(e => e.type === 'Exam'));
+          setExams(
+            data.events
+              .filter((e) => e.type === 'Exam')
+              .map((e) => ({
+                ...e,
+                exam_day_rule: e.exam_day_rule || "Auto-Present",
+                gap_rule: e.gap_rule || "Ignore"
+              }))
+          );
           setTimetable(data.timetable);
           setIsEditing(false); // Show Preview mode
         } else {
@@ -55,7 +63,13 @@ export default function SetupView({ session, subjects }) {
 
   // --- GENERAL HANDLERS ---
   const addHoliday = () => setHolidays([...holidays, { title: '', start_date: '', end_date: '' }]);
-  const addExam = () => setExams([...exams, { title: '', exam_type: 'Internal', dates: [''], gap_rule: 'Ignore' }]);
+  const addExam = () => setExams([...exams, {
+    title: '',
+    exam_type: 'Internal',
+    dates: [''],
+    exam_day_rule: 'Auto-Present',
+    gap_rule: 'Ignore'
+  }]);
   const addDateToExam = (examIndex) => {
     const updatedExams = [...exams];
     updatedExams[examIndex].dates.push('');
@@ -113,12 +127,16 @@ export default function SetupView({ session, subjects }) {
       if (response.ok) {
         setHasData(true);
         setIsEditing(false); // Switch back to preview!
-        setStep(1); 
+        setStep(1);
+        if (typeof onSaveComplete === "function") {
+          onSaveComplete();
+        }
       } else {
         const errorData = await response.json();
         alert("Failed to save setup: " + JSON.stringify(errorData.detail));
       }
     } catch (err) {
+      console.error("Save setup error:", err);
       alert("Server is offline. Make sure your Python backend is running!");
     }
   };
@@ -256,10 +274,18 @@ export default function SetupView({ session, subjects }) {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Rule for Gap Days</label>
-                  <select value={exam.gap_rule} onChange={e => { const newExams = [...exams]; newExams[index].gap_rule = e.target.value; setExams(newExams); }} className="w-full p-2 border rounded bg-gray-50">
-                    <option value="Ignore">Ignore (Prep Leave)</option>
-                    <option value="Auto-Present">Auto-Present</option>
+                  <label className="block text-sm font-medium mb-1">Exam Day Attendance Rule</label>
+                  <select value={exam.exam_day_rule || "Auto-Present"} onChange={e => { const newExams = [...exams]; newExams[index].exam_day_rule = e.target.value; setExams(newExams); }} className="w-full p-2 border rounded bg-gray-50">
+                    <option value="Auto-Present">Auto-Present (Get attendance on exam day)</option>
+                    <option value="Ignore">No Attendance (Do not mark exam day)</option>
+                    <option value="Normal">Normal</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Gap Day Attendance Rule</label>
+                  <select value={exam.gap_rule || "Ignore"} onChange={e => { const newExams = [...exams]; newExams[index].gap_rule = e.target.value; setExams(newExams); }} className="w-full p-2 border rounded bg-gray-50">
+                    <option value="Auto-Present">Auto-Present (Get attendance on gap days)</option>
+                    <option value="Ignore">No Attendance (Do not mark gap days)</option>
                     <option value="Normal">Normal</option>
                   </select>
                 </div>

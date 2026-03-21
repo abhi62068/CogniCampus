@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import BunkMeter from "./components/BunkMeter";
 import Auth from "./components/Auth";
@@ -15,29 +15,39 @@ function App() {
   const [apiStatus, setApiStatus] = useState("Connecting...");
   const [subjects, setSubjects] = useState([]);
   const [activeTab, setActiveTab] = useState("dashboard");
+  // --- UPDATED: Added targetAttendance state ---
+  const [targetAttendance, setTargetAttendance] = useState(75); 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newConducted, setNewConducted] = useState(0);
   const [newAttended, setNewAttended] = useState(0);
 
   useEffect(() => {
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }) => setSession(session));
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) =>
-      setSession(session),
-    );
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchSubjects = () => {
+  const fetchSubjects = useCallback(() => {
     if (!session) return;
     fetch(`http://127.0.0.1:8000/api/subjects?user_id=${session.user.id}`)
       .then((res) => res.json())
       .then((data) => setSubjects(data));
-  };
+  }, [session]);
+
+  // --- UPDATED: Added fetchUserSettings to get target_percentage ---
+  const fetchUserSettings = useCallback(() => {
+    if (!session) return;
+    fetch(`http://127.0.0.1:8000/api/setup/${session.user.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.has_setup && data.profile?.target_percentage !== undefined && data.profile?.target_percentage !== null) {
+          const parsedTarget = Number(data.profile.target_percentage);
+          setTargetAttendance(Number.isFinite(parsedTarget) ? parsedTarget : 75);
+        }
+      })
+      .catch((err) => console.error("Error fetching settings:", err));
+  }, [session]);
 
   useEffect(() => {
     if (session) {
@@ -45,9 +55,11 @@ function App() {
         .then((res) => res.json())
         .then((data) => setApiStatus(data.status))
         .catch(() => setApiStatus("Disconnected 🔴"));
+      
       fetchSubjects();
+      fetchUserSettings(); // Fetch settings on load
     }
-  }, [session]);
+  }, [session, fetchSubjects, fetchUserSettings]);
 
   const handleAddSubject = async (e) => {
     e.preventDefault();
@@ -68,48 +80,24 @@ function App() {
     }
   };
 
-  const handleDeleteSubject = async (id) => {
-    await fetch(`http://127.0.0.1:8000/api/subjects/${id}`, {
-      method: "DELETE",
-    });
-    fetchSubjects();
-  };
-
   if (!session) return <Auth />;
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans relative">
       <aside className="w-64 bg-gray-900 text-white flex flex-col shadow-xl z-10">
         <div className="p-6 border-b border-gray-800">
-          <h1 className="text-2xl font-bold tracking-wider text-blue-400">
-            CogniCampus
-          </h1>
+          <h1 className="text-2xl font-bold tracking-wider text-blue-400">CogniCampus</h1>
           <p className="text-xs text-gray-400 mt-1">Status: {apiStatus}</p>
         </div>
         <nav className="flex-1 p-4 space-y-2">
-          <button
-            onClick={() => setActiveTab("dashboard")}
-            className={`w-full text-left px-4 py-2 rounded-lg font-medium transition ${activeTab === "dashboard" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}
-          >
+          <button onClick={() => setActiveTab("dashboard")} className={`w-full text-left px-4 py-2 rounded-lg font-medium transition ${activeTab === "dashboard" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
             Dashboard
           </button>
-          <button
-            onClick={() => setActiveTab("setup")}
-            className={`w-full text-left px-4 py-2 rounded-lg font-medium transition ${activeTab === "setup" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}
-          >
+          <button onClick={() => setActiveTab("setup")} className={`w-full text-left px-4 py-2 rounded-lg font-medium transition ${activeTab === "setup" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}>
             Profile & Setup ⚙️
           </button>
           <div className="pt-10">
-            <p className="px-4 text-xs text-gray-500 uppercase mb-2">User</p>
-            <p className="px-4 text-sm text-gray-300 truncate mb-4">
-              {session.user.email}
-            </p>
-            <button
-              onClick={() => supabase.auth.signOut()}
-              className="w-full text-left px-4 py-2 text-red-400 hover:bg-red-900/20 rounded-lg transition"
-            >
-              Logout 🚪
-            </button>
+            <button onClick={() => supabase.auth.signOut()} className="w-full text-left px-4 py-2 text-red-400 hover:bg-red-900/20 rounded-lg transition">Logout 🚪</button>
           </div>
         </nav>
       </aside>
@@ -120,72 +108,41 @@ function App() {
             <header className="mb-8 flex justify-between items-center">
               <div>
                 <h2 className="text-3xl font-bold text-gray-800">Overview</h2>
-                <p className="text-gray-500 mt-1">
-                  Welcome back. Let's optimize your academic strategy.
-                </p>
+                {/* --- UPDATED: Showing dynamic target --- */}
+                <p className="text-gray-500 mt-1">Goal: {targetAttendance}% Attendance Strategy</p>
               </div>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Daily Tracker */}
               <TodaySchedule session={session} onUpdate={fetchSubjects} />
 
-              {/* Bunk Meter */}
+              {/* --- UPDATED: Passing targetAttendance prop --- */}
               <BunkMeter
-                defaultConducted={subjects.reduce(
-                  (sum, sub) => sum + sub.conducted,
-                  0,
-                )}
-                defaultAttended={subjects.reduce(
-                  (sum, sub) => sum + sub.attended,
-                  0,
-                )}
+                key={`${subjects.reduce((sum, sub) => sum + sub.conducted, 0)}-${subjects.reduce((sum, sub) => sum + sub.attended, 0)}`}
+                defaultConducted={subjects.reduce((sum, sub) => sum + sub.conducted, 0)}
+                defaultAttended={subjects.reduce((sum, sub) => sum + sub.attended, 0)}
+                targetAttendance={targetAttendance} 
               />
 
-              {/* Subject List */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 col-span-1 lg:col-span-3 position-relative">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">
-                  Your Subjects Database
-                </h3>
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="bg-blue-600 text-white px-6 py-2 m-5 rounded-lg font-bold shadow-lg shadow-blue-200 position-absolute right-100"
-                >
+                <h3 className="text-xl font-bold text-gray-800 mb-4">Your Subjects Database</h3>
+                <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-6 py-2 m-5 rounded-lg font-bold shadow-lg shadow-blue-200">
                   + Add Subject
                 </button>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {subjects.map((sub) => {
-                    const pct =
-                      sub.conducted > 0
-                        ? ((sub.attended / sub.conducted) * 100).toFixed(1)
-                        : 0;
+                    const pct = sub.conducted > 0 ? ((sub.attended / sub.conducted) * 100).toFixed(1) : 0;
                     return (
-                      <div
-                        key={sub.id}
-                        className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex justify-between items-center group relative"
-                      >
+                      <div key={sub.id} className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex justify-between items-center group relative">
                         <div>
-                          <p className="font-semibold text-gray-800">
-                            {sub.name}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {sub.attended} / {sub.conducted} Attended
-                          </p>
+                          <p className="font-semibold text-gray-800">{sub.name}</p>
+                          <p className="text-xs text-gray-500">{sub.attended} / {sub.conducted} Attended</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`font-bold ${pct >= 75 ? "text-green-600" : "text-red-600"}`}
-                          >
-                            {pct}%
-                          </span>
-                          <button
-                            onClick={() => handleDeleteSubject(sub.id)}
-                            className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            ✖
-                          </button>
-                        </div>
+                        {/* --- UPDATED: Dynamic color based on targetAttendance --- */}
+                        <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
+                          {pct}%
+                        </span>
                       </div>
                     );
                   })}
@@ -194,7 +151,8 @@ function App() {
             </div>
           </>
         ) : (
-          <SetupView session={session} subjects={subjects} />
+          /* --- UPDATED: Pass callback to refresh settings after setup save --- */
+          <SetupView session={session} subjects={subjects} onSaveComplete={fetchUserSettings} />
         )}
       </main>
 

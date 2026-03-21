@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export default function TodaySchedule({ session, onUpdate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showMarked, setShowMarked] = useState(false);
 
-  const fetchToday = async () => {
+  const fetchToday = useCallback(async () => {
+    if (!session?.user?.id) return;
     try {
       setLoading(true);
-      const res = await fetch(`http://127.0.0.1:8000/api/today-schedule/${session?.user?.id}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/today-schedule/${session.user.id}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Server Error");
@@ -22,11 +24,11 @@ export default function TodaySchedule({ session, onUpdate }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [session?.user?.id]);
 
   useEffect(() => {
-    if (session?.user?.id) fetchToday();
-  }, [session?.user?.id]);
+    fetchToday();
+  }, [fetchToday]);
 
   const handleMark = async (subjectId, period, status) => {
     try {
@@ -40,12 +42,15 @@ export default function TodaySchedule({ session, onUpdate }) {
           status: status
         })
       });
-      if (res.ok) {
-        await fetchToday();
-        onUpdate(); // Updates the Bunk Meter in App.jsx
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Unable to mark attendance.");
       }
+      await fetchToday();
+      onUpdate(); // Updates the Bunk Meter in App.jsx
     } catch (err) {
-      alert("Error marking attendance");
+      console.error("Mark attendance error:", err);
+      alert(err.message || "Error marking attendance");
     }
   };
 
@@ -65,43 +70,73 @@ export default function TodaySchedule({ session, onUpdate }) {
           <h3 className="text-xl font-bold text-gray-800">Today's Schedule</h3>
           <p className="text-xs text-gray-400">{data?.date}</p>
         </div>
-        <span className="px-3 py-1 bg-blue-600 text-white rounded-full text-xs font-bold uppercase">
-          {data?.day}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowMarked((prev) => !prev)}
+            className="text-xs px-3 py-1 border border-gray-300 rounded-full text-gray-600 hover:bg-gray-50"
+          >
+            {showMarked ? "Hide Marked" : "Show Marked"}
+          </button>
+          <span className="px-3 py-1 bg-blue-600 text-white rounded-full text-xs font-bold uppercase">
+            {data?.day}
+          </span>
+        </div>
       </div>
 
       <div className="space-y-4">
-        {(!data?.slots || data.slots.length === 0) ? (
-          <div className="text-center py-6">
-            <p className="text-gray-400 italic">No classes scheduled for today.</p>
-            <p className="text-xs text-gray-400 mt-1">Check your Timetable in Setup.</p>
-          </div>
-        ) : (
-          data.slots.map((slot) => {
-            const log = data.logs?.find(l => l.period_number === slot.period_number);
+        {(() => {
+          const allSlots = data?.slots || [];
+          const pendingSlots = (data?.slots || []).filter((slot) => {
+            const slotPeriod = Number(slot.period_number);
+            const log = data.logs?.find((l) => Number(l.period_number) === slotPeriod);
+            return !log;
+          });
+          const slotsToRender = showMarked ? allSlots : pendingSlots;
+
+          if (!allSlots || allSlots.length === 0) {
+            return (
+              <div className="text-center py-6">
+                <p className="text-gray-400 italic">No classes scheduled for today.</p>
+                <p className="text-xs text-gray-400 mt-1">Check your Timetable in Setup.</p>
+              </div>
+            );
+          }
+
+          if (!showMarked && pendingSlots.length === 0) {
+            return (
+              <div className="text-center py-6">
+                <p className="text-green-600 font-semibold">All periods marked for today.</p>
+                <p className="text-xs text-gray-400 mt-1">New periods will appear on the next day. Use "Show Marked" to review today.</p>
+              </div>
+            );
+          }
+
+          return slotsToRender.map((slot) => {
+            const slotPeriod = Number(slot.period_number);
+            const log = data.logs?.find((l) => Number(l.period_number) === slotPeriod);
             const subjectName = slot.subjects?.name || "Unknown Subject";
-            
+
             return (
               <div key={slot.period_number} className="flex justify-between items-center p-4 border rounded-xl bg-gray-50/50 hover:bg-gray-50 transition">
                 <div>
                   <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Period {slot.period_number}</p>
                   <p className="font-bold text-gray-800">{subjectName}</p>
                 </div>
-
                 {log ? (
                   <div className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-black ${log.status === 'Present' ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'}`}>
                     {log.status === 'Present' ? '✓ PRESENT' : '✖ ABSENT'}
                   </div>
                 ) : (
                   <div className="flex gap-2">
-                    <button 
-                      onClick={() => handleMark(slot.subject_id, slot.period_number, 'Present')} 
+                    <button
+                      onClick={() => handleMark(slot.subject_id, slotPeriod, 'Present')}
                       className="bg-white border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white w-10 h-10 rounded-full font-bold transition flex items-center justify-center shadow-sm"
                     >
                       ✓
                     </button>
-                    <button 
-                      onClick={() => handleMark(slot.subject_id, slot.period_number, 'Absent')} 
+                    <button
+                      onClick={() => handleMark(slot.subject_id, slotPeriod, 'Absent')}
                       className="bg-white border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white w-10 h-10 rounded-full font-bold transition flex items-center justify-center shadow-sm"
                     >
                       ✖
@@ -110,8 +145,8 @@ export default function TodaySchedule({ session, onUpdate }) {
                 )}
               </div>
             );
-          })
-        )}
+          });
+        })()}
       </div>
     </div>
   );
