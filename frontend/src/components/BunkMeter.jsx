@@ -1,61 +1,53 @@
 import { useState, useEffect } from 'react';
 
-export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0 }) {
-  // 1. Initialize state with the props passed from App.jsx
+// Ensure targetAttendance is received as a prop here
+export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0, targetAttendance = 75 }) {
   const [conducted, setConducted] = useState(defaultConducted);
   const [attended, setAttended] = useState(defaultAttended);
-  const target = 75; // Standard college threshold
 
-  // 2. Automatically update if the database data changes (like adding a new subject)
   useEffect(() => {
     setConducted(defaultConducted);
     setAttended(defaultAttended);
   }, [defaultConducted, defaultAttended]);
 
-  // 3. Validation Handlers for predictive manual typing
   const handleConductedChange = (e) => {
     const val = Number(e.target.value);
-    if (val < 0) return; // Prevent negative numbers
-    
     setConducted(val);
-    
-    // If conducted drops below attended, auto-adjust attended down
-    if (val < attended) {
-      setAttended(val);
-    }
+    if (val < attended) setAttended(val);
   };
 
   const handleAttendedChange = (e) => {
     const val = Number(e.target.value);
-    if (val < 0) return; // Prevent negative numbers
-    
-    // Prevent attended from exceeding conducted
-    if (val > conducted) {
-      setAttended(conducted);
-    } else {
-      setAttended(val);
-    }
+    if (val > conducted) setAttended(conducted);
+    else setAttended(val);
   };
 
-  // 4. The Math
+  // --- THE LOGIC FIX ---
   const percentage = conducted > 0 ? ((attended / conducted) * 100).toFixed(1) : 0;
   
-  let statusMessage = "";
-  let statusColor = "";
+  // We use the prop 'targetAttendance' instead of a hardcoded 75
+  const isSafe = Number(percentage) >= targetAttendance;
+  const targetDecimal = targetAttendance / 100;
+
+  let statusMessage = isSafe ? "Safe Zone 🟢" : "Danger Zone 🔴";
+  let statusColor = isSafe ? "text-green-600" : "text-red-600";
   let suggestion = "";
 
-  if (percentage >= target) {
-    const classesCanMiss = Math.floor((attended / (target / 100)) - conducted);
-    statusMessage = "Safe Zone 🟢";
-    statusColor = "text-green-600";
-    suggestion = `You can safely bunk ${classesCanMiss} upcoming class(es) and still stay at ${target}%.`;
-  } else {
-    // Math.ceil ensures we round up to the next whole class needed
-    const classesNeeded = Math.ceil(((target / 100) * conducted - attended) / (1 - (target / 100)));
-    statusMessage = "Danger Zone 🔴";
-    statusColor = "text-red-600";
-    suggestion = `You must attend the next ${classesNeeded} class(es) to get back to ${target}%. Do not bunk!`;
-  }
+  if (isSafe) {
+    const classesCanMiss = Math.max(0, Math.floor((attended / targetDecimal) - conducted));
+    
+    // Pluralization check
+    const unit = classesCanMiss <= 1 ? "class" : "classes";
+    
+    suggestion = `You can safely bunk ${classesCanMiss} upcoming ${unit} and still stay at ${targetAttendance}%.`;
+} else {
+    const classesNeeded = Math.ceil((targetDecimal * conducted - attended) / (1 - targetDecimal));
+    
+    // Pluralization check
+    const unit = classesNeeded <= 1 ? "class" : "classes";
+    
+    suggestion = `You must attend the next ${classesNeeded} ${unit} to get back to ${targetAttendance}%. Do not bunk!`;
+}
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 col-span-1 md:col-span-2 lg:col-span-3">
@@ -71,7 +63,7 @@ export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0 })
             type="number" 
             value={conducted}
             onChange={handleConductedChange}
-            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
         <div>
@@ -80,19 +72,20 @@ export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0 })
             type="number" 
             value={attended}
             onChange={handleAttendedChange}
-            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
         <div className="flex flex-col justify-center items-center bg-gray-50 rounded-lg p-2 border border-gray-100">
-          <span className="text-sm text-gray-500">Overall Attendance</span>
-          <span className={`text-3xl font-bold ${percentage >= target ? 'text-green-600' : 'text-red-600'}`}>
+          <span className="text-sm text-gray-500">Current Attendance</span>
+          <span className={`text-3xl font-bold ${statusColor}`}>
             {percentage}%
           </span>
+          <span className="text-xs text-gray-400">Target: {targetAttendance}%</span>
         </div>
       </div>
 
-      <div className={`p-4 rounded-lg ${percentage >= target ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-        <p className={`text-lg font-medium ${percentage >= target ? 'text-green-800' : 'text-red-800'}`}>
+      <div className={`p-4 rounded-lg ${isSafe ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+        <p className={`text-lg font-medium ${isSafe ? 'text-green-800' : 'text-red-800'}`}>
           💡 Insight: {suggestion}
         </p>
       </div>

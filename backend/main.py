@@ -153,6 +153,94 @@ def save_setup(payload: FullSetupPayload):
 @app.get("/api/today-schedule/{user_id}")
 def get_today_schedule(user_id: str):
     try:
+        now = datetime.now()
+        today_date = now.date().isoformat()
+        today_name = now.strftime("%A")
+
+        # 1. Fetch all events for this user
+        events = supabase.table("holidays_and_exams").select("*").eq("user_id", user_id).execute()
+
+        for event in events.data:
+            # Check for Holiday Ranges
+            if event['type'] == 'Holiday':
+                if event['start_date'] <= today_date <= event['end_date']:
+                    return {"is_event": True, "event_title": event['title'], "slots": []}
+            
+            # Check for Exams (Including the Gap Days)
+            if event['type'] == 'Exam':
+                # If today is one of the specific exam dates
+                if today_date in (event.get('dates') or []):
+                    return {"is_event": True, "event_title": f"{event['title']} (Exam Day)", "slots": []}
+                
+                # Logic for Gap Days: If today is between the first and last exam date
+                if event.get('dates'):
+                    sorted_dates = sorted(event['dates'])
+                    if sorted_dates[0] <= today_date <= sorted_dates[-1]:
+                        return {"is_event": True, "event_title": f"{event['title']} (Prep Leave)", "slots": []}
+
+        # 2. If no events, show normal schedule
+        slots = supabase.table("timetable_slots")\
+            .select("period_number, subject_id, subjects(name)")\
+            .eq("user_id", user_id)\
+            .eq("day_of_week", today_name)\
+            .order("period_number")\
+            .execute()
+
+        return {"is_event": False, "slots": slots.data, "day": today_name}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        now = datetime.now()
+        today_name = now.strftime("%A")
+        today_date = now.date().isoformat()
+
+        # 1. Check if today is a Holiday or Exam day
+        # We look for any event where today falls between start_date and end_date
+        check_event = supabase.table("holidays_and_exams")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .lte("start_date", today_date)\
+            .gte("end_date", today_date)\
+            .execute()
+
+        if check_event.data:
+            event = check_event.data[0]
+            return {
+                "day": today_name,
+                "date": today_date,
+                "is_event": True,
+                "event_title": event.get("title", "Holiday"),
+                "event_type": event.get("type"),
+                "slots": [],
+                "logs": []
+            }
+
+        # 2. If no holiday, proceed with normal schedule fetch
+        slots = supabase.table("timetable_slots")\
+            .select("period_number, subject_id, subjects(name)")\
+            .eq("user_id", user_id)\
+            .eq("day_of_week", today_name)\
+            .order("period_number")\
+            .execute()
+
+        logs = supabase.table("attendance_logs")\
+            .select("period_number, status")\
+            .eq("user_id", user_id)\
+            .eq("date", today_date)\
+            .execute()
+
+        return {
+            "day": today_name,
+            "date": today_date,
+            "is_event": False,
+            "slots": slots.data if slots.data else [],
+            "logs": logs.data if logs.data else []
+        }
+    except Exception as e:
+        print(f"Today Schedule Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
         days_map = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         today_name = days_map[datetime.now().weekday()]
         today_date = datetime.now().date().isoformat()
