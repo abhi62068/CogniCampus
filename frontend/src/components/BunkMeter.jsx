@@ -5,11 +5,6 @@ export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0, t
   const [conducted, setConducted] = useState(defaultConducted);
   const [attended, setAttended] = useState(defaultAttended);
 
-  useEffect(() => {
-    setConducted(defaultConducted);
-    setAttended(defaultAttended);
-  }, [defaultConducted, defaultAttended]);
-
   const handleConductedChange = (e) => {
     const val = Number(e.target.value);
     setConducted(val);
@@ -22,33 +17,48 @@ export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0, t
     else setAttended(val);
   };
 
-  // --- THE LOGIC FIX ---
-  const percentage = conducted > 0 ? ((attended / conducted) * 100).toFixed(1) : 0;
-  
-  // We use the prop 'targetAttendance' instead of a hardcoded 75
-  const isSafe = Number(percentage) >= targetAttendance;
-  const targetDecimal = targetAttendance / 100;
+  // Normalize values to avoid NaN/Infinity in dashboard calculations
+  const safeConducted = Math.max(0, Number(conducted) || 0);
+  const safeAttended = Math.min(Math.max(0, Number(attended) || 0), safeConducted);
+  const normalizedTarget = Math.min(100, Math.max(0, Number(targetAttendance) || 75));
+
+  const percentage = safeConducted > 0 ? ((safeAttended / safeConducted) * 100).toFixed(1) : "0.0";
+  const isSafe = Number(percentage) >= normalizedTarget;
+  const targetDecimal = normalizedTarget / 100;
 
   let statusMessage = isSafe ? "Safe Zone 🟢" : "Danger Zone 🔴";
   let statusColor = isSafe ? "text-green-600" : "text-red-600";
   let suggestion = "";
 
   if (isSafe) {
-    const classesCanMiss = Math.max(0, Math.floor((attended / targetDecimal) - conducted));
-    
-    // Pluralization check
-    const unit = classesCanMiss <= 1 ? "class" : "classes";
-    
-    suggestion = `You can safely bunk ${classesCanMiss} upcoming ${unit} and still stay at ${targetAttendance}%.`;
-} else {
-    const classesNeeded = Math.ceil((targetDecimal * conducted - attended) / (1 - targetDecimal));
-    
-    // Pluralization check
-    const unit = classesNeeded <= 1 ? "class" : "classes";
-    
-    suggestion = `You must attend the next ${classesNeeded} ${unit} to get back to ${targetAttendance}%. Do not bunk!`;
-}
+  if (normalizedTarget <= 0) {
+    suggestion = "Any attendance stays above a 0% target.";
+  } else if (normalizedTarget >= 100) {
+    suggestion = safeAttended === safeConducted
+      ? "You cannot bunk any class if your target is 100%."
+      : "Attend every upcoming class to move toward a 100% target.";
+  } else {
+    const classesCanMiss = Math.floor((safeAttended / targetDecimal) - safeConducted);
+    const finalMiss = Math.max(0, classesCanMiss);
 
+    // Pluralization
+    const unit = finalMiss === 1 ? "class" : "classes";
+
+    suggestion = `You can safely bunk ${finalMiss} upcoming ${unit} and still stay at ${normalizedTarget}%.`;
+  }
+} else {
+  if (normalizedTarget >= 100) {
+    suggestion = "You must attend every upcoming class. A 100% target allows no absences.";
+  } else {
+    const classesNeeded = Math.ceil((targetDecimal * safeConducted - safeAttended) / (1 - targetDecimal));
+    const finalNeeded = Math.max(0, classesNeeded);
+
+    // Pluralization
+    const unit = finalNeeded === 1 ? "class" : "classes";
+
+    suggestion = `You must attend the next ${finalNeeded} ${unit} to get back to ${normalizedTarget}%. Do not bunk!`;
+  }
+}
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 col-span-1 md:col-span-2 lg:col-span-3">
       <div className="flex justify-between items-center mb-4">
@@ -80,7 +90,7 @@ export default function BunkMeter({ defaultConducted = 0, defaultAttended = 0, t
           <span className={`text-3xl font-bold ${statusColor}`}>
             {percentage}%
           </span>
-          <span className="text-xs text-gray-400">Target: {targetAttendance}%</span>
+          <span className="text-xs text-gray-400">Target: {normalizedTarget}%</span>
         </div>
       </div>
 
