@@ -47,6 +47,7 @@ class ExamSetup(BaseModel):
     title: str
     exam_type: str
     dates: List[str]
+    exam_day_rule: Optional[str] = "Auto-Present"
     gap_rule: str
 
 class FullSetupPayload(BaseModel):
@@ -153,11 +154,52 @@ def save_setup(payload: FullSetupPayload):
 @app.get("/api/today-schedule/{user_id}")
 def get_today_schedule(user_id: str):
     try:
-        days_map = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        today_name = days_map[datetime.now().weekday()]
-        today_date = datetime.now().date().isoformat()
+        now = datetime.now()
+        today_date = now.date().isoformat()
+        today_name = now.strftime("%A")
 
-        # Join timetable with subjects table to get subject names
+        # 1. Fetch all events for this user
+        events = supabase.table("holidays_and_exams").select("*").eq("user_id", user_id).execute()
+
+        is_holiday = False
+        is_exam_day = False
+        is_gap_day = False
+        day_rule = "Ignore"
+        event_title = None
+
+        for event in events.data:
+            if event['type'] == 'Holiday':
+                if event['start_date'] <= today_date <= event['end_date']:
+                    is_holiday = True
+                    event_title = event['title']
+                    break
+
+            if event['type'] == 'Exam':
+                exam_dates = sorted(event.get('dates') or [])
+                if today_date in exam_dates:
+                    is_exam_day = True
+                    event_title = f"{event['title']} (Exam Day)"
+                    day_rule = event.get("exam_day_rule") or "Auto-Present"
+                    break
+                if exam_dates and exam_dates[0] <= today_date <= exam_dates[-1]:
+                    is_gap_day = True
+                    event_title = f"{event['title']} (Gap Day)"
+                    day_rule = event.get("gap_rule") or "Ignore"
+                    break
+
+        # 2. Holiday day: hide periods entirely
+        if is_holiday:
+            return {
+                "day": today_name,
+                "date": today_date,
+                "is_event": True,
+                "event_title": event_title,
+                "event_type": "Holiday",
+                "slots": [],
+                "logs": []
+            }
+
+        # 3. Fetch today's scheduled periods (needed for normal and exam-day processing)
         slots = supabase.table("timetable_slots")\
             .select("period_number, subject_id, subjects(name)")\
             .eq("user_id", user_id)\
@@ -165,6 +207,50 @@ def get_today_schedule(user_id: str):
             .order("period_number")\
             .execute()
 
+        # 4. Exam/gap day: hide periods; optionally auto-mark attendance based on configured rule
+        if (is_exam_day or is_gap_day) and day_rule == "Auto-Present":
+            for slot in (slots.data or []):
+                period_number = int(slot["period_number"])
+                subject_id = int(slot["subject_id"])
+
+                existing_log = supabase.table("attendance_logs")\
+                    .select("id")\
+                    .eq("user_id", user_id)\
+                    .eq("date", today_date)\
+                    .eq("period_number", period_number)\
+                    .execute()
+
+                if existing_log.data:
+                    continue
+
+                supabase.table("attendance_logs").insert({
+                    "user_id": user_id,
+                    "subject_id": subject_id,
+                    "period_number": period_number,
+                    "date": today_date,
+                    "status": "Present"
+                }).execute()
+
+                sub = supabase.table("subjects").select("conducted, attended").eq("id", subject_id).single().execute()
+                new_c = int(sub.data["conducted"]) + 1
+                new_a = int(sub.data["attended"]) + 1
+                supabase.table("subjects").update({
+                    "conducted": new_c,
+                    "attended": new_a
+                }).eq("id", subject_id).execute()
+
+        if is_exam_day or is_gap_day:
+            return {
+                "day": today_name,
+                "date": today_date,
+                "is_event": True,
+                "event_title": event_title,
+                "event_type": "Exam" if is_exam_day else "Gap Day",
+                "slots": [],
+                "logs": []
+            }
+
+        # 5. Normal day: show periods and today's logs
         logs = supabase.table("attendance_logs")\
             .select("period_number, status")\
             .eq("user_id", user_id)\
@@ -172,9 +258,10 @@ def get_today_schedule(user_id: str):
             .execute()
 
         return {
-            "day": today_name, 
-            "date": today_date, 
-            "slots": slots.data if slots.data else [], 
+            "day": today_name,
+            "date": today_date,
+            "is_event": False,
+            "slots": slots.data if slots.data else [],
             "logs": logs.data if logs.data else []
         }
     except Exception as e:
@@ -185,7 +272,23 @@ def get_today_schedule(user_id: str):
 def mark_attendance(data: AttendanceMark):
     try:
         today_date = datetime.now().date().isoformat()
-        
+
+        # Prevent duplicate marking for same user/day/period
+        existing = (
+            supabase.table("attendance_logs")
+            .select("id, status, subject_id")
+            .eq("user_id", data.user_id)
+            .eq("date", today_date)
+            .eq("period_number", data.period_number)
+            .execute()
+        )
+
+        if existing.data:
+            raise HTTPException(
+                status_code=409,
+                detail="Attendance already marked for this period today."
+            )
+
         # 1. Log the history entry
         supabase.table("attendance_logs").insert({
             "user_id": data.user_id, 
@@ -208,6 +311,8 @@ def mark_attendance(data: AttendanceMark):
         }).eq("id", data.subject_id).execute()
 
         return {"message": "Updated"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Marking Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
