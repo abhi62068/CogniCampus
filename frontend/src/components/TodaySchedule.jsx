@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 
+// Added dynamic API URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
 export default function TodaySchedule({ session, onUpdate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -10,7 +13,8 @@ export default function TodaySchedule({ session, onUpdate }) {
     if (!session?.user?.id) return;
     try {
       setLoading(true);
-      const res = await fetch(`http://127.0.0.1:8000/api/today-schedule/${session.user.id}`);
+      // Updated fetch URL
+      const res = await fetch(`${API_BASE_URL}/api/today-schedule/${session.user.id}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "Server Error");
@@ -32,7 +36,8 @@ export default function TodaySchedule({ session, onUpdate }) {
 
   const handleMark = async (subjectId, period, status) => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/mark-attendance', {
+      // Updated fetch URL
+      const res = await fetch(`${API_BASE_URL}/api/mark-attendance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
