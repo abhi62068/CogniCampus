@@ -10,12 +10,14 @@ const supabase = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzb2plY3dzb3Vtc2V6d3JwbGNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMDk1MjQsImV4cCI6MjA4OTU4NTUyNH0.6ToR4xAjWtxSSAhnt5zkBEz6bXAq8InKVGCferp_HAk",
 );
 
+// Added dynamic API URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
 function App() {
   const [session, setSession] = useState(null);
   const [apiStatus, setApiStatus] = useState("Connecting...");
   const [subjects, setSubjects] = useState([]);
   const [activeTab, setActiveTab] = useState("dashboard");
-  // --- UPDATED: Added targetAttendance state ---
   const [targetAttendance, setTargetAttendance] = useState(75); 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -30,15 +32,16 @@ function App() {
 
   const fetchSubjects = useCallback(() => {
     if (!session) return;
-    fetch(`http://127.0.0.1:8000/api/subjects?user_id=${session.user.id}`)
+    // Updated fetch URL
+    fetch(`${API_BASE_URL}/api/subjects?user_id=${session.user.id}`)
       .then((res) => res.json())
       .then((data) => setSubjects(data));
   }, [session]);
 
-  // --- UPDATED: Added fetchUserSettings to get target_percentage ---
   const fetchUserSettings = useCallback(() => {
     if (!session) return;
-    fetch(`http://127.0.0.1:8000/api/setup/${session.user.id}`)
+    // Updated fetch URL
+    fetch(`${API_BASE_URL}/api/setup/${session.user.id}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.has_setup && data.profile?.target_percentage !== undefined && data.profile?.target_percentage !== null) {
@@ -51,19 +54,21 @@ function App() {
 
   useEffect(() => {
     if (session) {
-      fetch("http://127.0.0.1:8000/api/status")
+      // Updated fetch URL
+      fetch(`${API_BASE_URL}/api/status`)
         .then((res) => res.json())
         .then((data) => setApiStatus(data.status))
         .catch(() => setApiStatus("Disconnected 🔴"));
       
       fetchSubjects();
-      fetchUserSettings(); // Fetch settings on load
+      fetchUserSettings(); 
     }
   }, [session, fetchSubjects, fetchUserSettings]);
 
   const handleAddSubject = async (e) => {
     e.preventDefault();
-    const res = await fetch("http://127.0.0.1:8000/api/subjects", {
+    // Updated fetch URL
+    const res = await fetch(`${API_BASE_URL}/api/subjects`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -108,7 +113,6 @@ function App() {
             <header className="mb-8 flex justify-between items-center">
               <div>
                 <h2 className="text-3xl font-bold text-gray-800">Overview</h2>
-                {/* --- UPDATED: Showing dynamic target --- */}
                 <p className="text-gray-500 mt-1">Goal: {targetAttendance}% Attendance Strategy</p>
               </div>
             </header>
@@ -116,7 +120,6 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <TodaySchedule session={session} onUpdate={fetchSubjects} />
 
-              {/* --- UPDATED: Passing targetAttendance prop --- */}
               <BunkMeter
                 key={`${subjects.reduce((sum, sub) => sum + sub.conducted, 0)}-${subjects.reduce((sum, sub) => sum + sub.attended, 0)}`}
                 defaultConducted={subjects.reduce((sum, sub) => sum + sub.conducted, 0)}
@@ -139,7 +142,6 @@ function App() {
                           <p className="font-semibold text-gray-800">{sub.name}</p>
                           <p className="text-xs text-gray-500">{sub.attended} / {sub.conducted} Attended</p>
                         </div>
-                        {/* --- UPDATED: Dynamic color based on targetAttendance --- */}
                         <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
                           {pct}%
                         </span>
@@ -151,7 +153,6 @@ function App() {
             </div>
           </>
         ) : (
-          /* --- UPDATED: Pass callback to refresh settings after setup save --- */
           <SetupView session={session} subjects={subjects} onSaveComplete={fetchUserSettings} />
         )}
       </main>

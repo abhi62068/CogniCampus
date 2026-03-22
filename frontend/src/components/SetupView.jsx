@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 
+// Added dynamic API URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
 export default function SetupView({ session, subjects, onSaveComplete }) {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -25,7 +28,8 @@ export default function SetupView({ session, subjects, onSaveComplete }) {
 
   // 1. Fetch existing data on load
   useEffect(() => {
-    fetch(`http://127.0.0.1:8000/api/setup/${session.user.id}`)
+    // Updated fetch URL
+    fetch(`${API_BASE_URL}/api/setup/${session.user.id}`)
       .then(res => res.json())
       .then(data => {
         if (data.has_setup) {
@@ -105,7 +109,6 @@ export default function SetupView({ session, subjects, onSaveComplete }) {
   };
 
   // --- SAVE LOGIC ---
- // --- SAVE LOGIC ---
   const handleSaveAll = async () => {
     
     // 1. Sanitize the profile dates
@@ -139,7 +142,8 @@ export default function SetupView({ session, subjects, onSaveComplete }) {
     };
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/setup', {
+      // Updated fetch URL
+      const response = await fetch(`${API_BASE_URL}/api/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
