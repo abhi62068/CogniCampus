@@ -105,15 +105,36 @@ export default function SetupView({ session, subjects, onSaveComplete }) {
   };
 
   // --- SAVE LOGIC ---
+ // --- SAVE LOGIC ---
   const handleSaveAll = async () => {
+    
+    // 1. Sanitize the profile dates
+    const cleanProfile = {
+      ...profile,
+      target_percentage: Number(profile.target_percentage),
+      semester_start_date: profile.semester_start_date === "" ? null : profile.semester_start_date,
+      last_working_day: profile.last_working_day === "" ? null : profile.last_working_day
+    };
+
+    // 2. Sanitize the holiday dates
+    const cleanHolidays = holidays.map(hol => ({
+      ...hol,
+      start_date: hol.start_date === "" ? null : hol.start_date,
+      end_date: hol.end_date === "" ? null : hol.end_date
+    }));
+
+    // 3. Sanitize exam dates (filter out any empty date boxes so we don't send [""])
+    const cleanExams = exams.map(exam => ({
+      ...exam,
+      dates: exam.dates.filter(date => date !== "")
+    }));
+
+    // 4. Build the final payload with the cleaned data
     const payload = {
       user_id: session.user.id,
-      profile: {
-        ...profile,
-        target_percentage: Number(profile.target_percentage)
-      },
-      holidays: holidays,
-      exams: exams,
+      profile: cleanProfile,
+      holidays: cleanHolidays,
+      exams: cleanExams,
       timetable: timetable
     };
 
