@@ -316,3 +316,7 @@ def mark_attendance(data: AttendanceMark):
     except Exception as e:
         print(f"Marking Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    
+@app.get("/")
+def read_root():
+    return {"status": "success", "message": "Welcome to the CogniCampus API"}
