@@ -1,14 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
 import BunkMeter from "./components/BunkMeter";
 import Auth from "./components/Auth";
+import LandingPage from "./components/LandingPage";
 import SetupView from "./components/SetupView";
 import TodaySchedule from "./components/TodaySchedule";
+import { calculateTotalClassesPerSubject } from "./utils/calculateTotalClassesPerSubject";
+import supabase from "./lib/supabaseClient";
 
-const supabase = createClient(
-  "https://esojecwsoumsezwrplcl.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzb2plY3dzb3Vtc2V6d3JwbGNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMDk1MjQsImV4cCI6MjA4OTU4NTUyNH0.6ToR4xAjWtxSSAhnt5zkBEz6bXAq8InKVGCferp_HAk",
-);
+// Supabase client is centralized in `src/lib/supabaseClient.js`
 
 // Added dynamic API URL
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -23,6 +22,8 @@ function App() {
   const [newName, setNewName] = useState("");
   const [newConducted, setNewConducted] = useState(0);
   const [newAttended, setNewAttended] = useState(0);
+  const [showLogin, setShowLogin] = useState(false);
+  const [setupData, setSetupData] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -47,6 +48,33 @@ function App() {
         if (data.has_setup && data.profile?.target_percentage !== undefined && data.profile?.target_percentage !== null) {
           const parsedTarget = Number(data.profile.target_percentage);
           setTargetAttendance(Number.isFinite(parsedTarget) ? parsedTarget : 75);
+        }
+
+        if (data.has_setup) {
+          const holidays = (data.events || [])
+            .filter((e) => e.type === "Holiday" && e.title)
+            .map((e) => ({
+              title: e.title,
+              start_date: e.start_date,
+              end_date: e.end_date,
+            }));
+
+          const exams = (data.events || [])
+            .filter((e) => e.type === "Exam" && e.title)
+            .map((e) => ({
+              title: e.title,
+              exam_type: e.exam_type,
+              dates: e.dates || [],
+              exam_day_rule: e.exam_day_rule || "Auto-Present",
+              gap_rule: e.gap_rule || "Ignore",
+            }));
+
+          setSetupData({
+            profile: data.profile || {},
+            timetable: data.timetable || {},
+            holidays,
+            exams,
+          });
         }
       })
       .catch((err) => console.error("Error fetching settings:", err));
@@ -85,7 +113,20 @@ function App() {
     }
   };
 
-  if (!session) return <Auth />;
+  if (!session) {
+    return showLogin ? <Auth /> : <LandingPage onGetStarted={() => setShowLogin(true)} />;
+  }
+
+  const semesterTotals = setupData
+    ? calculateTotalClassesPerSubject({
+        timetable: setupData.timetable,
+        semester_start_date: setupData.profile?.semester_start_date,
+        last_working_day: setupData.profile?.last_working_day,
+        holidays: setupData.holidays,
+        leaves: [],
+        exams: setupData.exams,
+      })
+    : { totalClassesBySubjectId: {} };
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans relative">
@@ -136,11 +177,23 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {subjects.map((sub) => {
                     const pct = sub.conducted > 0 ? ((sub.attended / sub.conducted) * 100).toFixed(1) : 0;
+                    const totalSemester = Number(semesterTotals?.totalClassesBySubjectId?.[String(sub.id)] || 0);
+                    const remainingSemester = Math.max(0, totalSemester - Number(sub.conducted || 0));
                     return (
                       <div key={sub.id} className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex justify-between items-center group relative">
                         <div>
                           <p className="font-semibold text-gray-800">{sub.name}</p>
                           <p className="text-xs text-gray-500">{sub.attended} / {sub.conducted} Attended</p>
+                          {setupData && (
+                            <>
+                              <p className="text-[11px] text-gray-600 mt-2">
+                                Total semester classes: <span className="font-bold">{totalSemester}</span>
+                              </p>
+                              <p className="text-[11px] text-gray-600">
+                                Remaining semester classes: <span className="font-bold">{remainingSemester}</span>
+                              </p>
+                            </>
+                          )}
                         </div>
                         <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
                           {pct}%
