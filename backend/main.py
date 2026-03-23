@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 from supabase import create_client, Client
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -84,6 +84,18 @@ def add_subject(subject: Subject):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.put("/api/subjects/{subject_id}")
+def update_subject(subject_id: int, subject: Subject):
+    try:
+        response = supabase.table("subjects").update({
+            "name": subject.name,
+            "conducted": subject.conducted,
+            "attended": subject.attended
+        }).eq("id", subject_id).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.delete("/api/subjects/{subject_id}")
 def delete_subject(subject_id: int):
     try:
@@ -148,6 +160,94 @@ def save_setup(payload: FullSetupPayload):
         return {"message": "Setup Saved"}
     except Exception as e:
         print(f"Setup Save Error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/unmarked-dates/{user_id}")
+def get_unmarked_dates(user_id: str):
+    try:
+        profile_res = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
+        if not profile_res.data:
+            return {}
+        prof = profile_res.data[0]
+        start_date_str = prof.get("semester_start_date")
+        if not start_date_str:
+            return {}
+            
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        today = datetime.now().date()
+        if start_date > today:
+            return {}
+
+        events = supabase.table("holidays_and_exams").select("*").eq("user_id", user_id).execute().data or []
+        slots = supabase.table("timetable_slots").select("*").eq("user_id", user_id).execute().data or []
+        logs = supabase.table("attendance_logs").select("date, period_number, subject_id").eq("user_id", user_id).execute().data or []
+        
+        slots_by_day = {}
+        for s in slots:
+            day = s["day_of_week"]
+            if day not in slots_by_day:
+                slots_by_day[day] = []
+            slots_by_day[day].append(s)
+            
+        logs_by_date_period = {}
+        for l in logs:
+            key = f"{l['date']}-{l['period_number']}"
+            logs_by_date_period[key] = l['subject_id']
+
+        holidays = [e for e in events if e.get("type") == "Holiday" and e.get("start_date") and e.get("end_date")]
+        exams = [e for e in events if e.get("type") == "Exam"]
+        
+        unmarked = {}
+
+        current_date = start_date
+        while current_date <= today:
+            cd_str = current_date.isoformat()
+            cd_name = current_date.strftime("%A")
+            
+            is_holiday = False
+            for h in holidays:
+                if h["start_date"] <= cd_str <= h["end_date"]:
+                    is_holiday = True
+                    break
+            if is_holiday:
+                current_date += timedelta(days=1)
+                continue
+                
+            is_exam_day = False
+            is_gap_day = False
+            day_rule = "Ignore"
+            
+            for e in exams:
+                edates = sorted(e.get("dates") or [])
+                if cd_str in edates:
+                    is_exam_day = True
+                    day_rule = e.get("exam_day_rule") or "Auto-Present"
+                    break
+                if edates and edates[0] <= cd_str <= edates[-1]:
+                    is_gap_day = True
+                    day_rule = e.get("gap_rule") or "Ignore"
+                    break
+                    
+            if (is_exam_day or is_gap_day) and day_rule == "Ignore":
+                current_date += timedelta(days=1)
+                continue
+                
+            day_slots = slots_by_day.get(cd_name, [])
+            for slot in day_slots:
+                sid = slot["subject_id"]
+                pn = slot["period_number"]
+                log_key = f"{cd_str}-{pn}"
+                
+                if log_key not in logs_by_date_period:
+                    if str(sid) not in unmarked:
+                        unmarked[str(sid)] = []
+                    unmarked[str(sid)].append({"date": cd_str, "period": pn})
+            
+            current_date += timedelta(days=1)
+            
+        return unmarked
+    except Exception as e:
+        print(f"Unmarked Dates Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 # --- DAILY ATTENDANCE ENDPOINTS ---
@@ -316,7 +416,3 @@ def mark_attendance(data: AttendanceMark):
     except Exception as e:
         print(f"Marking Error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-    
-@app.get("/")
-def read_root():
-    return {"status": "success", "message": "Welcome to the CogniCampus API"}

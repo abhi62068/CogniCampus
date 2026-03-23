@@ -24,6 +24,8 @@ function App() {
   const [newAttended, setNewAttended] = useState(0);
   const [showLogin, setShowLogin] = useState(false);
   const [setupData, setSetupData] = useState(null);
+  const [unmarkedDates, setUnmarkedDates] = useState({});
+  const [editingSubject, setEditingSubject] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -80,6 +82,14 @@ function App() {
       .catch((err) => console.error("Error fetching settings:", err));
   }, [session]);
 
+  const fetchUnmarkedDates = useCallback(() => {
+    if (!session) return;
+    fetch(`${API_BASE_URL}/api/unmarked-dates/${session.user.id}`)
+      .then((res) => res.json())
+      .then((data) => setUnmarkedDates(data))
+      .catch((err) => console.error("Error fetching unmarked dates:", err));
+  }, [session]);
+
   useEffect(() => {
     if (session) {
       // Updated fetch URL
@@ -90,27 +100,68 @@ function App() {
       
       fetchSubjects();
       fetchUserSettings(); 
+      fetchUnmarkedDates();
     }
-  }, [session, fetchSubjects, fetchUserSettings]);
+  }, [session, fetchSubjects, fetchUserSettings, fetchUnmarkedDates]);
 
   const handleAddSubject = async (e) => {
     e.preventDefault();
-    // Updated fetch URL
-    const res = await fetch(`${API_BASE_URL}/api/subjects`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newName,
-        conducted: Number(newConducted),
-        attended: Number(newAttended),
-        user_id: session.user.id,
-      }),
-    });
-    if (res.ok) {
-      fetchSubjects();
-      setIsModalOpen(false);
-      setNewName("");
+    if (editingSubject) {
+      const res = await fetch(`${API_BASE_URL}/api/subjects/${editingSubject.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          conducted: Number(newConducted),
+          attended: Number(newAttended),
+          user_id: session.user.id,
+        }),
+      });
+      if (res.ok) {
+        fetchSubjects();
+        setIsModalOpen(false);
+        setEditingSubject(null);
+        setNewName("");
+      }
+    } else {
+      const res = await fetch(`${API_BASE_URL}/api/subjects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          conducted: Number(newConducted),
+          attended: Number(newAttended),
+          user_id: session.user.id,
+        }),
+      });
+      if (res.ok) {
+        fetchSubjects();
+        setIsModalOpen(false);
+        setNewName("");
+      }
     }
+  };
+
+  const handleDeleteSubject = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this subject?")) return;
+    const res = await fetch(`${API_BASE_URL}/api/subjects/${id}`, { method: 'DELETE' });
+    if (res.ok) fetchSubjects();
+  };
+
+  const openEditModal = (sub) => {
+    setEditingSubject(sub);
+    setNewName(sub.name);
+    setNewConducted(sub.conducted);
+    setNewAttended(sub.attended);
+    setIsModalOpen(true);
+  };
+  
+  const openAddModal = () => {
+    setEditingSubject(null);
+    setNewName("");
+    setNewConducted(0);
+    setNewAttended(0);
+    setIsModalOpen(true);
   };
 
   if (!session) {
@@ -170,7 +221,7 @@ function App() {
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 col-span-1 lg:col-span-3 position-relative">
                 <h3 className="text-xl font-bold text-gray-800 mb-4">Your Subjects Database</h3>
-                <button onClick={() => setIsModalOpen(true)} className="bg-blue-600 text-white px-6 py-2 m-5 rounded-lg font-bold shadow-lg shadow-blue-200">
+                <button onClick={openAddModal} className="bg-blue-600 text-white px-6 py-2 m-5 rounded-lg font-bold shadow-lg shadow-blue-200">
                   + Add Subject
                 </button>
 
@@ -180,24 +231,47 @@ function App() {
                     const totalSemester = Number(semesterTotals?.totalClassesBySubjectId?.[String(sub.id)] || 0);
                     const remainingSemester = Math.max(0, totalSemester - Number(sub.conducted || 0));
                     return (
-                      <div key={sub.id} className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex justify-between items-center group relative">
-                        <div>
-                          <p className="font-semibold text-gray-800">{sub.name}</p>
-                          <p className="text-xs text-gray-500">{sub.attended} / {sub.conducted} Attended</p>
-                          {setupData && (
-                            <>
-                              <p className="text-[11px] text-gray-600 mt-2">
-                                Total semester classes: <span className="font-bold">{totalSemester}</span>
-                              </p>
-                              <p className="text-[11px] text-gray-600">
-                                Remaining semester classes: <span className="font-bold">{remainingSemester}</span>
-                              </p>
-                            </>
-                          )}
+                      <div key={sub.id} className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex flex-col group relative">
+                        <div className="flex justify-between items-start w-full">
+                          <div>
+                            <p className="font-semibold text-gray-800">{sub.name}</p>
+                            <p className="text-xs text-gray-500">{sub.attended} / {sub.conducted} Attended</p>
+                            {setupData && (
+                              <>
+                                <p className="text-[11px] text-gray-600 mt-2">
+                                  Total semester classes: <span className="font-bold">{totalSemester}</span>
+                                </p>
+                                <p className="text-[11px] text-gray-600">
+                                  Remaining semester classes: <span className="font-bold">{remainingSemester}</span>
+                                </p>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end">
+                            <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
+                              {pct}%
+                            </span>
+                            <div className="flex gap-2 mt-2">
+                              <button onClick={() => openEditModal(sub)} title="Edit Subject" className="text-blue-500 hover:text-blue-700 bg-blue-100 p-1 rounded-md text-xs">✏️ Edit</button>
+                              <button onClick={() => handleDeleteSubject(sub.id)} title="Delete Subject" className="text-red-500 hover:text-red-700 bg-red-100 p-1 rounded-md text-xs">🗑️ Del</button>
+                            </div>
+                          </div>
                         </div>
-                        <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
-                          {pct}%
-                        </span>
+                        <div className="w-full mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-xs font-bold text-gray-700 mb-1">Unmarked Classes:</p>
+                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1" style={{ scrollbarWidth: 'thin' }}>
+                            {unmarkedDates[sub.id]?.length > 0 ? (
+                              unmarkedDates[sub.id].map((u, i) => (
+                                <div key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 flex justify-between">
+                                  <span>{u.date}</span>
+                                  <span>Period {u.period}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-[10px] text-gray-400 italic">No unmarked classes</p>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
@@ -213,7 +287,7 @@ function App() {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-2xl w-96">
-            <h3 className="text-xl font-bold mb-4">Add New Subject</h3>
+            <h3 className="text-xl font-bold mb-4">{editingSubject ? "Edit Subject" : "Add New Subject"}</h3>
             <form onSubmit={handleAddSubject} className="space-y-4">
               <input
                 required
@@ -228,6 +302,7 @@ function App() {
                   required
                   placeholder="Conducted"
                   type="number"
+                  value={newConducted}
                   onChange={(e) => setNewConducted(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg"
                 />
@@ -235,6 +310,7 @@ function App() {
                   required
                   placeholder="Attended"
                   type="number"
+                  value={newAttended}
                   onChange={(e) => setNewAttended(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg"
                 />
