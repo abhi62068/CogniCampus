@@ -99,6 +99,11 @@ def update_subject(subject_id: int, subject: Subject):
 @app.delete("/api/subjects/{subject_id}")
 def delete_subject(subject_id: int):
     try:
+        # Delete dependent rows first to prevent foreign key constraint errors
+        supabase.table("attendance_logs").delete().eq("subject_id", subject_id).execute()
+        supabase.table("timetable_slots").delete().eq("subject_id", subject_id).execute()
+        
+        # Delete the subject as the final step
         supabase.table("subjects").delete().eq("id", subject_id).execute()
         return {"message": "Success"}
     except Exception as e:
