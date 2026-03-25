@@ -285,37 +285,42 @@ function App() {
                     const totalSemester = Number(semesterTotals?.totalClassesBySubjectId?.[String(sub.id)] || 0);
                     const remainingSemester = Math.max(0, totalSemester - Number(sub.conducted || 0));
                     
-                    const targetDec = (targetAttendance || 75) / 100;
+                    const currentTarget = Number(targetAttendance) || 75;
+                    const targetDec = currentTarget / 100;
+                    const conductedNum = Number(sub.conducted) || 0;
+                    const attendedNum = Number(sub.attended) || 0;
+
                     let predictionText = "";
                     let predictionColor = "";
-                    if (sub.conducted > 0) {
-                      if (Number(pct) >= (targetAttendance || 75)) {
+                    
+                    if (conductedNum > 0) {
+                      if (Number(pct) >= currentTarget) {
                         if (targetDec >= 1) {
                           predictionText = `Cannot leave any classes`;
-                          predictionColor = "text-green-600";
+                          predictionColor = "bg-green-100 text-green-700";
                         } else if (targetDec <= 0) {
                           predictionText = `Can leave any amount of classes`;
-                          predictionColor = "text-green-600";
+                          predictionColor = "bg-green-100 text-green-700";
                         } else {
-                          const canMiss = Math.floor((sub.attended / targetDec) - sub.conducted);
+                          const canMiss = Math.floor((attendedNum / targetDec) - conductedNum);
                           const maxMiss = Math.max(0, canMiss);
-                          predictionText = `Can leave: ${maxMiss} class${maxMiss !== 1 ? 'es' : ''}`;
-                          predictionColor = "text-green-600";
+                          predictionText = `✓ You can leave ${maxMiss} class${maxMiss !== 1 ? 'es' : ''}`;
+                          predictionColor = "bg-green-100 text-green-700";
                         }
                       } else {
                         if (targetDec >= 1) {
                           predictionText = `Cannot reach 100% target`;
-                          predictionColor = "text-red-500";
+                          predictionColor = "bg-red-100 text-red-700";
                         } else {
-                          const needed = Math.ceil((targetDec * sub.conducted - sub.attended) / (1 - targetDec));
+                          const needed = Math.ceil((targetDec * conductedNum - attendedNum) / (1 - targetDec));
                           const neededClasses = Math.max(0, needed);
-                          predictionText = `Need to attend: ${neededClasses} class${neededClasses !== 1 ? 'es' : ''}`;
-                          predictionColor = "text-red-500";
+                          predictionText = `⚠ Need to attend ${neededClasses} class${neededClasses !== 1 ? 'es' : ''}`;
+                          predictionColor = "bg-red-100 text-red-700";
                         }
                       }
                     } else {
                       predictionText = "No classes conducted";
-                      predictionColor = "text-gray-500";
+                      predictionColor = "bg-gray-100 text-gray-500";
                     }
 
                     return (
@@ -334,9 +339,11 @@ function App() {
                                 </p>
                               </>
                             )}
-                            <p className={`text-[11px] font-semibold mt-1 ${predictionColor}`}>
-                              {predictionText}
-                            </p>
+                            <div className="mt-2">
+                              <span className={`text-[11px] font-semibold px-2 py-1 rounded-md inline-block ${predictionColor}`}>
+                                {predictionText}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-col items-end">
                             <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
