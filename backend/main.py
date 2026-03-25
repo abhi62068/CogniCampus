@@ -236,6 +236,14 @@ def get_unmarked_dates(user_id: str):
             if (is_exam_day or is_gap_day) and day_rule == "Ignore":
                 current_date += timedelta(days=1)
                 continue
+
+            # If this is an exam/gap day with `Auto-Present`, the backend attendance
+            # would already be considered "present" (by /api/today-schedule).
+            # We must not mark such periods as unmarked, even if logs haven't been
+            # created yet (avoids race conditions between endpoints).
+            if (is_exam_day or is_gap_day) and day_rule == "Auto-Present":
+                current_date += timedelta(days=1)
+                continue
                 
             day_slots = slots_by_day.get(cd_name, [])
             for slot in day_slots:

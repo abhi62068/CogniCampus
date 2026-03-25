@@ -90,6 +90,60 @@ function App() {
       .catch((err) => console.error("Error fetching unmarked dates:", err));
   }, [session]);
 
+  const handleMarkPastUnmarked = useCallback(
+    async (subjectId, periodNumber, dateStr, status) => {
+      if (!session?.user?.id) return;
+
+      const sidKey = String(subjectId);
+      const periodNum = Number(periodNumber);
+
+      // Optimistic UI: immediately remove the clicked row from the list.
+      setUnmarkedDates((prev) => {
+        const next = { ...prev };
+        const raw = next[sidKey] ?? next[subjectId] ?? [];
+        next[sidKey] = raw.filter(
+          (u) => !(u.date === dateStr && Number(u.period) === periodNum)
+        );
+        return next;
+      });
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/mark-attendance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: session.user.id,
+            subject_id: Number(subjectId),
+            period_number: periodNum,
+            status,
+            date: dateStr, // important: mark the provided past date
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const detail = errData.detail;
+          throw new Error(
+            typeof detail === "string"
+              ? detail
+              : JSON.stringify(detail) || "Unable to mark attendance."
+          );
+        }
+
+        // Refresh data to guarantee correctness.
+        fetchSubjects();
+        fetchUnmarkedDates();
+      } catch (err) {
+        console.error("Mark past attendance error:", err);
+        alert(err.message || "Failed to mark attendance");
+        // Roll back by reloading.
+        fetchUnmarkedDates();
+        fetchSubjects();
+      }
+    },
+    [session, fetchSubjects, fetchUnmarkedDates]
+  );
+
   useEffect(() => {
     if (session) {
       // Updated fetch URL
@@ -261,10 +315,47 @@ function App() {
                           <p className="text-xs font-bold text-gray-700 mb-1">Unmarked Classes:</p>
                           <div className="max-h-24 overflow-y-auto space-y-1 pr-1" style={{ scrollbarWidth: 'thin' }}>
                             {unmarkedDates[sub.id]?.length > 0 ? (
-                              unmarkedDates[sub.id].map((u, i) => (
-                                <div key={i} className="text-[10px] bg-red-50 text-red-600 px-2 py-1 rounded border border-red-100 flex justify-between">
-                                  <span>{u.date}</span>
-                                  <span>Period {u.period}</span>
+                              unmarkedDates[sub.id].map((u) => (
+                                <div
+                                  key={`${u.date}-${u.period}`}
+                                  className="text-[10px] bg-red-50 text-red-600 px-2 py-1.5 rounded border border-red-100 flex items-center justify-between gap-2"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="truncate">{u.date}</span>
+                                    <span className="shrink-0">Period {u.period}</span>
+                                  </div>
+                                  <div className="flex shrink-0 gap-1">
+                                    <button
+                                      type="button"
+                                      title="Present"
+                                      onClick={() =>
+                                        handleMarkPastUnmarked(
+                                          sub.id,
+                                          u.period,
+                                          u.date,
+                                          "Present"
+                                        )
+                                      }
+                                      className="bg-white border-2 border-green-500 text-green-600 hover:bg-green-500 hover:text-white w-7 h-7 rounded-full font-bold transition flex items-center justify-center"
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      title="Absent"
+                                      onClick={() =>
+                                        handleMarkPastUnmarked(
+                                          sub.id,
+                                          u.period,
+                                          u.date,
+                                          "Absent"
+                                        )
+                                      }
+                                      className="bg-white border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white w-7 h-7 rounded-full font-bold transition flex items-center justify-center"
+                                    >
+                                      ✖
+                                    </button>
+                                  </div>
                                 </div>
                               ))
                             ) : (
