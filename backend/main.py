@@ -62,6 +62,7 @@ class AttendanceMark(BaseModel):
     subject_id: int
     period_number: int
     status: str # "Present" or "Absent"
+    date: Optional[str] = None
     
 @app.get("/")
 def read_root():
@@ -388,14 +389,14 @@ def get_today_schedule(user_id: str):
 @app.post("/api/mark-attendance")
 def mark_attendance(data: AttendanceMark):
     try:
-        today_date = datetime.now().date().isoformat()
+        target_date = data.date if data.date else datetime.now().date().isoformat()
 
         # Prevent duplicate marking for same user/day/period
         existing = (
             supabase.table("attendance_logs")
             .select("id, status, subject_id")
             .eq("user_id", data.user_id)
-            .eq("date", today_date)
+            .eq("date", target_date)
             .eq("period_number", data.period_number)
             .execute()
         )
@@ -403,7 +404,7 @@ def mark_attendance(data: AttendanceMark):
         if existing.data:
             raise HTTPException(
                 status_code=409,
-                detail="Attendance already marked for this period today."
+                detail="Attendance already marked for this period."
             )
 
         # 1. Log the history entry
@@ -411,7 +412,7 @@ def mark_attendance(data: AttendanceMark):
             "user_id": data.user_id, 
             "subject_id": data.subject_id, 
             "period_number": data.period_number, 
-            "date": today_date, 
+            "date": target_date, 
             "status": data.status
         }).execute()
         
