@@ -62,6 +62,10 @@ class AttendanceMark(BaseModel):
     subject_id: int
     period_number: int
     status: str # "Present" or "Absent"
+    
+@app.get("/")
+def read_root():
+    return {"message": "Cognicampus API is running!"}
 
 @app.get("/api/status")
 def get_status():
