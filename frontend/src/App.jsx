@@ -284,6 +284,45 @@ function App() {
                     const pct = sub.conducted > 0 ? ((sub.attended / sub.conducted) * 100).toFixed(1) : 0;
                     const totalSemester = Number(semesterTotals?.totalClassesBySubjectId?.[String(sub.id)] || 0);
                     const remainingSemester = Math.max(0, totalSemester - Number(sub.conducted || 0));
+                    
+                    const currentTarget = Number(targetAttendance) || 75;
+                    const targetDec = currentTarget / 100;
+                    const conductedNum = Number(sub.conducted) || 0;
+                    const attendedNum = Number(sub.attended) || 0;
+
+                    let predictionText = "";
+                    let predictionColor = "";
+                    
+                    if (conductedNum > 0) {
+                      if (Number(pct) >= currentTarget) {
+                        if (targetDec >= 1) {
+                          predictionText = `Cannot leave any classes`;
+                          predictionColor = "bg-green-100 text-green-700";
+                        } else if (targetDec <= 0) {
+                          predictionText = `Can leave any amount of classes`;
+                          predictionColor = "bg-green-100 text-green-700";
+                        } else {
+                          const canMiss = Math.floor((attendedNum / targetDec) - conductedNum);
+                          const maxMiss = Math.max(0, canMiss);
+                          predictionText = `✓ You can leave ${maxMiss} class${maxMiss !== 1 ? 'es' : ''}`;
+                          predictionColor = "bg-green-100 text-green-700";
+                        }
+                      } else {
+                        if (targetDec >= 1) {
+                          predictionText = `Cannot reach 100% target`;
+                          predictionColor = "bg-red-100 text-red-700";
+                        } else {
+                          const needed = Math.ceil((targetDec * conductedNum - attendedNum) / (1 - targetDec));
+                          const neededClasses = Math.max(0, needed);
+                          predictionText = `⚠ Need to attend ${neededClasses} class${neededClasses !== 1 ? 'es' : ''}`;
+                          predictionColor = "bg-red-100 text-red-700";
+                        }
+                      }
+                    } else {
+                      predictionText = "No classes conducted";
+                      predictionColor = "bg-gray-100 text-gray-500";
+                    }
+
                     return (
                       <div key={sub.id} className="p-4 border border-gray-100 rounded-lg bg-gray-50 flex flex-col group relative">
                         <div className="flex justify-between items-start w-full">
@@ -300,6 +339,11 @@ function App() {
                                 </p>
                               </>
                             )}
+                            <div className="mt-2">
+                              <span className={`text-[11px] font-semibold px-2 py-1 rounded-md inline-block ${predictionColor}`}>
+                                {predictionText}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex flex-col items-end">
                             <span className={`font-bold ${pct >= targetAttendance ? "text-green-600" : "text-red-600"}`}>
